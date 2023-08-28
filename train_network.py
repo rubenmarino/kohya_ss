@@ -295,9 +295,17 @@ class NetworkTrainer:
             )
             args.scale_weight_norms = False
 
+        args.network_train_text_unet_only = args.stop_text_encoder_training <= 0
         train_unet = not args.network_train_text_encoder_only
         train_text_encoder = not args.network_train_unet_only and not self.is_text_encoder_outputs_cached(args)
         network.apply_to(text_encoder, unet, train_text_encoder, train_unet)
+
+        if args.stop_text_encoder_training is None:
+            args.stop_text_encoder_training = args.max_train_steps + 1  # do not stop until end
+
+        unet.requires_grad_(True)  # 念のため追加
+        for t_enc in text_encoders:
+            t_enc.requires_grad_(train_text_encoder)
 
         if args.network_weights is not None:
             info = network.load_weights(args.network_weights)
@@ -725,12 +733,25 @@ class NetworkTrainer:
 
             metadata["ss_epoch"] = str(epoch + 1)
 
-            network.on_epoch_start(text_encoder, unet)
+            if args.gradient_checkpointing or global_step < args.stop_text_encoder_training:
+                network.on_epoch_start(text_encoder, unet)
+            else:
+                network.on_epoch_start(None, unet)
 
             for step, batch in enumerate(train_dataloader):
                 current_step.value = global_step
+                
+                if global_step == args.stop_text_encoder_training:
+                    accelerator.print(f" <-- stop text encoder training at step {global_step}")
+                    if not args.gradient_checkpointing:
+                        for t_enc in text_encoders:
+                            t_enc.train(False)
+                    for t_enc in text_encoders:
+                        t_enc.requires_grad_(False)
+
                 with accelerator.accumulate(network):
-                    on_step_start(text_encoder, unet)
+                    # ????
+                    on_step_start(None, unet)
 
                     with torch.no_grad():
                         if "latents" in batch and batch["latents"] is not None:
@@ -746,7 +767,7 @@ class NetworkTrainer:
                         latents = latents * self.vae_scale_factor
                     b_size = latents.shape[0]
 
-                    with torch.set_grad_enabled(train_text_encoder):
+                    with torch.set_grad_enabled(global_step < args.stop_text_encoder_training):
                         # Get the text embedding for conditioning
                         if args.weighted_captions:
                             text_encoder_conds = get_weighted_text_embeddings(
@@ -977,6 +998,13 @@ def setup_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="do not use fp16/bf16 VAE in mixed precision (use float VAE) / mixed precisionでも fp16/bf16 VAEを使わずfloat VAEを使う",
     )
+    parser.add_argument(
+        "--stop_text_encoder_training",
+        type=int,
+        default=None,
+        help="steps to stop text encoder training, -1 for no training / Text Encoderの学習を止めるステップ数、-1で最初から学習しない",
+    )
+
     return parser
 
 
