@@ -755,10 +755,6 @@ class NetworkTrainer:
                         on_step_start(text_encoder, unet)
                     else:
                         on_step_start(None, unet)
-                    if (global_step < args.stop_text_encoder_training):
-                        on_step_start(text_encoder, unet)
-                    else:
-                        on_step_start(None, unet)
 
                     with torch.no_grad():
                         if "latents" in batch and batch["latents"] is not None:
