@@ -751,6 +751,10 @@ class NetworkTrainer:
 
                 with accelerator.accumulate(network):
                     # ????
+                    if global_step < args.stop_text_encoder_training:
+                        on_step_start(text_encoder, unet)
+                    else:
+                        on_step_start(None, unet)
                     if (global_step < args.stop_text_encoder_training):
                         on_step_start(text_encoder, unet)
                     else:
