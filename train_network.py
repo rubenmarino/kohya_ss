@@ -733,10 +733,13 @@ class NetworkTrainer:
 
             metadata["ss_epoch"] = str(epoch + 1)
 
+            unet.train()
             if args.gradient_checkpointing or global_step < args.stop_text_encoder_training:
-                network.on_epoch_start(text_encoder, unet)
-            else:
-                network.on_epoch_start(None, unet)
+                #network.on_epoch_start(text_encoder, unet)
+                for t_enc in text_encoders:
+                    t_enc.train()
+            #else:
+            #    network.on_epoch_start(None, unet)
 
             for step, batch in enumerate(train_dataloader):
                 current_step.value = global_step
@@ -750,11 +753,7 @@ class NetworkTrainer:
                         t_enc.requires_grad_(False)
 
                 with accelerator.accumulate(network):
-                    # ????
-                    if global_step < args.stop_text_encoder_training:
-                        on_step_start(text_encoder, unet)
-                    else:
-                        on_step_start(None, unet)
+                    on_step_start(text_encoder, unet)
 
                     with torch.no_grad():
                         if "latents" in batch and batch["latents"] is not None:
