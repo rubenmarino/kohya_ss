@@ -236,6 +236,7 @@ def train(args):
 
     train_unet = not args.network_train_text_encoder_only
     train_text_encoder = not args.network_train_unet_only
+    train_text_encoder = args.stop_text_encoder_training is None or args.stop_text_encoder_training >= 0
     network.apply_to(text_encoder, unet, train_text_encoder, train_unet)
 
     if args.network_weights is not None:
@@ -284,6 +285,9 @@ def train(args):
 
     # データセット側にも学習ステップを送信
     train_dataset_group.set_max_train_steps(args.max_train_steps)
+
+    if args.stop_text_encoder_training is None:
+        args.stop_text_encoder_training = args.max_train_steps + 1  # do not stop until end
 
     # lr schedulerを用意する
     lr_scheduler = train_util.get_scheduler_fix(args, optimizer, accelerator.num_processes)
@@ -613,7 +617,7 @@ def train(args):
         metadata["ss_epoch"] = str(epoch + 1)
 
         unet.train()
-        if args.gradient_checkpointing or global_step < 110:
+        if args.gradient_checkpointing or global_step < args.stop_text_encoder_training:
             #network.on_epoch_start(text_encoder, unet)
             text_encoder.train()
         #else:
@@ -622,7 +626,7 @@ def train(args):
         for step, batch in enumerate(train_dataloader):
             current_step.value = global_step
             #ruben
-            if global_step == 110:
+            if global_step == args.stop_text_encoder_training:
                 print(f" -> stop text encoder training at step {global_step}")
                 if not args.gradient_checkpointing:
                     text_encoder.train(False)
@@ -640,7 +644,7 @@ def train(args):
                     latents = latents * 0.18215
                 b_size = latents.shape[0]
 
-                with torch.set_grad_enabled(global_step < 110):
+                with torch.set_grad_enabled(global_step < args.stop_text_encoder_training):
                     # Get the text embedding for conditioning
                     if args.weighted_captions:
                         encoder_hidden_states = get_weighted_text_embeddings(
@@ -873,6 +877,13 @@ def setup_parser() -> argparse.ArgumentParser:
         nargs="*",
         help="multiplier for network weights to merge into the model before training / 学習前にあらかじめモデルにマージするnetworkの重みの倍率",
     )
+    parser.add_argument(
+        "--stop_text_encoder_training",
+        type=int,
+        default=None,
+        help="steps to stop text encoder training, -1 for no training / Text Encoderの学習を止めるステップ数、-1で最初から学習しない",
+    )
+
     return parser
 
 
